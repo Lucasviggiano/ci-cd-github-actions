@@ -1,0 +1,57 @@
+﻿name: TCC API Smoke Flow
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BASE_URL: ${{ vars.BASE_URL != '' && vars.BASE_URL || 'http://lojaebac.ebaconline.art.br' }}
+  COUPONS_PATH: ${{ vars.COUPONS_PATH != '' && vars.COUPONS_PATH || '/wp-json/wc/v3/coupons' }}
+  API_BASIC_USER: ${{ secrets.API_BASIC_USER != '' && secrets.API_BASIC_USER || 'admin_ebac' }}
+  API_BASIC_PASS: ${{ secrets.API_BASIC_PASS != '' && secrets.API_BASIC_PASS || '@admin!&b@c!2022' }}
+
+jobs:
+  api-smoke-from-tcc:
+    name: API Smoke from TCC Base
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout CI/CD repository
+        uses: actions/checkout@v4
+
+      - name: Clone TCC source repository
+        run: git clone --depth 1 https://github.com/Lucasviggiano/ebac-tcc-qe.git tcc-source
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tcc-source/automation/API/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: tcc-source/automation/API
+        run: npm ci
+
+      - name: Prepare evidence folder
+        run: mkdir -p tcc-source/reports/ci/api-smoke
+
+      - name: Run API smoke suite
+        working-directory: tcc-source/automation/API
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:api:smoke 2>&1 | tee ../../reports/ci/api-smoke/api-smoke.log
+
+      - name: Upload API smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-smoke-evidence
+          path: |
+            tcc-source/reports/ci/api-smoke
+          if-no-files-found: ignore
+          retention-days: 14

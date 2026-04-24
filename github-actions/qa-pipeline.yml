@@ -1,0 +1,178 @@
+name: QA Complete Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - feat/**
+      - codex/**
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+  workflow_dispatch:
+    inputs:
+      run_performance:
+        description: "Executar testes de performance (k6)"
+        required: true
+        default: true
+        type: boolean
+      run_mobile:
+        description: "Executar testes Mobile Android (Appium + WDIO)"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-pipeline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_URL: ${{ vars.BASE_URL != '' && vars.BASE_URL || 'http://lojaebac.ebaconline.art.br' }}
+  COUPONS_PATH: ${{ vars.COUPONS_PATH != '' && vars.COUPONS_PATH || '/wp-json/wc/v3/coupons' }}
+  API_BASIC_USER: ${{ secrets.API_BASIC_USER != '' && secrets.API_BASIC_USER || 'admin_ebac' }}
+  API_BASIC_PASS: ${{ secrets.API_BASIC_PASS != '' && secrets.API_BASIC_PASS || '@admin!&b@c!2022' }}
+
+jobs:
+  api-tests:
+    name: API Tests - Supertest/Jest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: automation/API/package-lock.json
+
+      - name: Install dependencies
+        working-directory: automation/API
+        run: npm ci
+
+      - name: Prepare log folder
+        run: mkdir -p reports/ci/api
+
+      - name: Run API suite (full)
+        working-directory: automation/API
+        shell: bash
+        run: |
+          set -o pipefail
+          LOG_PATH=../../reports/ci/api/api-tests.log
+          ATTEMPT_1_LOG=../../reports/ci/api/api-tests-attempt1.log
+          ATTEMPT_2_LOG=../../reports/ci/api/api-tests-attempt2.log
+
+          : > "$LOG_PATH"
+
+          echo "[API] Tentativa 1/2" | tee -a "$LOG_PATH"
+          npm run test:api:all 2>&1 | tee "$ATTEMPT_1_LOG" | tee -a "$LOG_PATH"
+          API_EXIT=${PIPESTATUS[0]}
+
+          if [ "$API_EXIT" -ne 0 ]; then
+            echo "[API] Falha na tentativa 1. Executando retry (2/2)." | tee -a "$LOG_PATH"
+            npm run test:api:all 2>&1 | tee "$ATTEMPT_2_LOG" | tee -a "$LOG_PATH"
+            API_EXIT=${PIPESTATUS[0]}
+          fi
+
+          exit "$API_EXIT"
+
+      - name: Upload API evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-evidence
+          path: |
+            reports/ci/api
+            automation/API/coverage
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ui-tests:
+    name: UI Tests - Cypress
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Cypress (Chrome)
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: automation/UI
+          browser: chrome
+          command: npm run test:ui
+
+      - name: Upload UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-evidence
+          path: |
+            automation/UI/cypress/screenshots
+            automation/UI/cypress/videos
+            automation/UI/cypress/downloads
+          if-no-files-found: ignore
+          retention-days: 14
+
+  performance-tests:
+    name: Performance Tests - k6
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_performance }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Prepare report and log folders
+        run: |
+          mkdir -p performance/k6/reports
+          mkdir -p reports/ci/performance
+
+      - name: Run k6 scenarios (login + catalog)
+        shell: bash
+        env:
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          NO_PROXY: lojaebac.ebaconline.art.br,localhost,127.0.0.1,::1
+        run: |
+          set +e
+          k6 run --summary-export=performance/k6/reports/login-summary.json performance/k6/login-performance.js 2>&1 | tee reports/ci/performance/k6-login.log
+          LOGIN_EXIT=${PIPESTATUS[0]}
+
+          k6 run --summary-export=performance/k6/reports/catalog-summary.json performance/k6/catalog-performance.js 2>&1 | tee reports/ci/performance/k6-catalog.log
+          CATALOG_EXIT=${PIPESTATUS[0]}
+
+          echo "K6_LOGIN_EXIT=$LOGIN_EXIT" >> $GITHUB_ENV
+          echo "K6_CATALOG_EXIT=$CATALOG_EXIT" >> $GITHUB_ENV
+
+          if [ "$LOGIN_EXIT" -ne 0 ] || [ "$CATALOG_EXIT" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-evidence
+          path: |
+            performance/k6/reports
+            reports/ci/performance
+          if-no-files-found: ignore
+          retention-days: 14
+
