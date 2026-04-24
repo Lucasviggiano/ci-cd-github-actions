@@ -20,19 +20,17 @@ Repositorio de pipeline CI/CD para validacao de qualidade da EBAC Shop com GitHu
 
 ## Visao Geral
 
-Este projeto centraliza a pipeline de qualidade para execucao automatizada de testes por camada:
+Este projeto centraliza pipelines de qualidade para execucao automatizada de testes por camada.
 
-- API (Jest + Supertest)
-- UI (Cypress)
-- Performance (k6)
+Workflows disponiveis neste repo:
 
-Workflow principal:
-
-- `.github/workflows/qa-pipeline.yml`
+- `.github/workflows/qa-pipeline.yml` (pipeline completa documental)
+- `.github/workflows/tcc-api-smoke.yml` (fluxo executavel baseado no repo TCC)
 
 Espelho documental:
 
 - `github-actions/qa-pipeline.yml`
+- `github-actions/tcc-api-smoke.yml`
 
 ## Stack e Versoes
 
@@ -45,6 +43,8 @@ Espelho documental:
 
 ## Arquitetura da Pipeline
 
+### 1) `qa-pipeline.yml` (completa)
+
 Gatilhos:
 
 - `push` em `main`, `master`, `develop`, `feat/**`, `codex/**`
@@ -56,69 +56,60 @@ Gatilhos:
 Jobs ativos:
 
 - `api-tests`
-  - instala dependencias em `automation/API`
-  - executa `npm run test:api:all`
-  - publica `api-evidence`
-
 - `ui-tests`
-  - executa Cypress em Chrome em `automation/UI`
-  - publica `ui-evidence`
-
 - `performance-tests`
-  - instala k6
-  - executa login + catalogo em `performance/k6`
-  - publica `performance-evidence`
+
+### 2) `tcc-api-smoke.yml` (fluxo executavel neste repo)
+
+Gatilho:
+
+- `workflow_dispatch`
+
+Job ativo:
+
+- `api-smoke-from-tcc`
+  - faz checkout deste repo
+  - clona `https://github.com/Lucasviggiano/ebac-tcc-qe.git`
+  - instala dependencias em `tcc-source/automation/API`
+  - executa `npm run test:api:smoke`
+  - publica artefato `api-smoke-evidence`
 
 ## Cenarios Cobertos
 
-### API
+### `qa-pipeline.yml`
 
-- suite completa de API (`test:api:all`) com retry de 1 tentativa
+- API (suite completa)
+- UI (suite Cypress)
+- Performance (login + catalogo k6)
 
-### UI
+### `tcc-api-smoke.yml`
 
-- suite completa Cypress (`test:ui`)
-
-### Performance
-
-- `login-performance.js`
-- `catalog-performance.js`
+- API Smoke (GraphQL health) da base TCC
 
 ## Pre-requisitos
 
-Para a pipeline executar com sucesso no GitHub, o repositorio precisa conter a estrutura esperada pelo workflow:
+Para execucao com sucesso no GitHub:
 
-- `automation/API`
-- `automation/UI`
-- `performance/k6`
-- `reports/ci`
-
-Observacao importante:
-
-- este repositorio atual contem apenas a definicao de CI/CD e nao inclui as camadas de teste acima.
+- permissao de checkout e clone de repositorio publico
+- disponibilidade do repositório base `Lucasviggiano/ebac-tcc-qe`
+- (opcional) secrets/vars para sobrescrever credenciais e URLs
 
 ## Instalacao
 
-Nao ha instalacao obrigatoria para editar arquivos YAML.
-
-Para simulacao local de workflow, ferramentas opcionais:
-
-- `act` (nao instalado neste ambiente)
-- parser YAML local (PowerShell `ConvertFrom-Yaml` ou Python `PyYAML`)
+Nao ha instalacao obrigatoria para editar os YAMLs.
 
 ## Execucao da Pipeline
 
-### Execucao no GitHub Actions
+### Fluxo recomendado neste repo (funcional)
 
 1. Abra a aba **Actions**.
-2. Selecione **QA Complete Pipeline**.
+2. Selecione **TCC API Smoke Flow**.
 3. Clique em **Run workflow**.
-4. Defina `run_performance=true` quando quiser incluir k6.
+4. Execute e acompanhe o job `api-smoke-from-tcc`.
 
-### Execucao local
+### Pipeline completa
 
-- a execucao real da pipeline local so e viavel quando a estrutura de pastas requerida existe no repositorio.
-- neste repo isolado, os caminhos usados em `working-directory` nao existem.
+- A `QA Complete Pipeline` permanece disponivel, mas depende da estrutura monorepo (`automation/*`, `performance/*`) no mesmo repositorio.
 
 ## Estrutura do Projeto
 
@@ -126,72 +117,70 @@ Para simulacao local de workflow, ferramentas opcionais:
 .
 |-- .github/
 |   `-- workflows/
-|       `-- qa-pipeline.yml
+|       |-- qa-pipeline.yml
+|       `-- tcc-api-smoke.yml
 |-- github-actions/
-|   `-- qa-pipeline.yml
+|   |-- qa-pipeline.yml
+|   `-- tcc-api-smoke.yml
 `-- README.md
 ```
 
 ## Explicacao do Teste neste Repo Isolado
 
-Resultado do teste realizado neste repositorio:
+Status atual de testabilidade:
 
-- validacao estrutural: **OK**
-  - arquivos de workflow e README presentes
-- validacao de execucao da pipeline: **bloqueada por design**
-  - paths exigidos no workflow nao existem aqui (`automation/*`, `performance/*`, `reports/ci`)
-- validacao local de YAML: **nao concluida por falta de ferramenta no ambiente**
-  - `ConvertFrom-Yaml` indisponivel
-  - `PyYAML` nao instalado
-- simulacao local de Actions: **nao disponivel**
-  - `act` nao instalado
+- `qa-pipeline.yml`: **nao executavel isoladamente**
+  - referencia paths locais inexistentes neste repo (`automation/*`, `performance/*`, `reports/ci`)
+
+- `tcc-api-smoke.yml`: **executavel**
+  - resolve a limitacao ao clonar o repo base do TCC durante o job
+  - executa ao menos um fluxo real de teste (`test:api:smoke`)
 
 Conclusao:
 
-- este repositorio funciona como repositorio de definicao/documentacao da pipeline.
-- para execucao ponta a ponta, use o workflow no monorepo que contem as pastas de testes ou adapte o checkout para multiplos repositorios.
+- este repositorio agora possui pelo menos um fluxo de teste funcional baseado no TCC.
 
 ## Troubleshooting
 
-### 1) Falha por path inexistente no workflow
+### 1) Falha ao clonar repositório base
 
 Sintoma comum:
 
-- erro de `working-directory` nao encontrado (`automation/API`, `automation/UI`, `performance/k6`)
+- erro no passo `git clone` do job `api-smoke-from-tcc`
 
 Acoes recomendadas:
 
-- executar em repositorio com a estrutura completa
-- ou ajustar a pipeline para fazer checkout de repositorios separados
+- validar disponibilidade do GitHub no runner
+- conferir se URL do repositorio base permanece publica
 
-### 2) Nao valida sintaxe YAML localmente
+### 2) Falha na suite API smoke
 
 Sintoma comum:
 
-- ferramenta de parser nao encontrada
+- job falha no passo `npm run test:api:smoke`
 
 Acoes recomendadas:
 
-- instalar PowerShell com `ConvertFrom-Yaml` disponivel
-- ou instalar `PyYAML` para validacao via Python
+- verificar indisponibilidade do ambiente `lojaebac.ebaconline.art.br`
+- revisar logs em `api-smoke-evidence`
 
-### 3) Nao consegue simular GitHub Actions localmente
+### 3) Pipeline completa falhando por path
 
 Sintoma comum:
 
-- comando `act` indisponivel
+- erro de `working-directory` nao encontrado em `qa-pipeline.yml`
 
 Acoes recomendadas:
 
-- instalar `act` e Docker
-- usar validacao direta via GitHub Actions
+- usar o fluxo `tcc-api-smoke.yml` neste repo isolado
+- ou mover `qa-pipeline.yml` para monorepo com estrutura completa
 
 ## Boas Praticas para Evolucao
 
-- Tratar `.github/workflows/qa-pipeline.yml` como fonte de verdade
-- Manter o arquivo espelho sincronizado quando houver alteracoes
-- Versionar toda alteracao de job com descricao clara no README
-- Evitar referencias a paths inexistentes sem estrategia de checkout
+- Tratar `.github/workflows/qa-pipeline.yml` como baseline de pipeline completa
+- Manter `tcc-api-smoke.yml` como fluxo minimo funcional para este repo isolado
+- Sincronizar sempre os arquivos espelho em `github-actions/`
+- Versionar alteracoes de pipeline com changelog resumido no README
 
 ## Autor
 
